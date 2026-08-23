@@ -525,7 +525,6 @@ namespace ImGui
                     p[i] = old_buf[first_diff + i];
     }
 
-
     void RenderTextWithFont(
         ImFont* font,
         ImDrawList* draw_list,
@@ -536,20 +535,16 @@ namespace ImGui
         const char* text_begin,
         const char* text_end,
         float wrap_width,
-        ImDrawTextFlags flags
+        ImDrawTextFlags flags,
+        ImMulitlineTextGeometryData* textGeometryData
     )
     {
+         // Align to be pixel perfect
     begin:
-        // Align to be pixel perfect
-        float x = pos.x;
-        float y = pos.y;
+        float x = IM_TRUNC(pos.x);
+        float y = IM_TRUNC(pos.y);
         if (y > clip_rect.w)
             return;
-        if ((draw_list->Flags & ImDrawListFlags_TextNoPixelSnap) == 0)
-        {
-            x = IM_TRUNC(x);
-            y = IM_TRUNC(y);
-        }
 
         if (!text_end)
             text_end = text_begin + ImStrlen(text_begin); // ImGui:: functions generally already provides a valid text_end, so this is merely to handle direct calls.
@@ -599,6 +594,9 @@ namespace ImGui
         if (s == text_end)
             return;
 
+
+        uint32_t currentVertexIndex = draw_list->VtxBuffer.size();
+
         // Reserve vertices for remaining worse case (over-reserving is useful and easily amortized)
         const int vtx_count_max = (int)(text_end - s) * 4;
         const int idx_count_max = (int)(text_end - s) * 6;
@@ -612,6 +610,12 @@ namespace ImGui
 
         const ImU32 col_untinted = col | ~IM_COL32_A_MASK;
         const char* word_wrap_eol = NULL;
+
+
+        if (textGeometryData != nullptr)
+        {
+            textGeometryData->m_LinesStartPos.push_back(ImVec2(x, y));
+        }
 
         while (s < text_end)
         {
@@ -629,6 +633,30 @@ namespace ImGui
                         break; // break out of main loop
                     word_wrap_eol = NULL;
                     s = ImTextCalcWordWrapNextLineStart(s, text_end, flags); // Wrapping skips upcoming blanks
+
+                    if (textGeometryData != nullptr)
+                    {
+                        if (s > text_begin)
+                        {
+                            const char* previousCharPtr = s - 1;
+                            if (*previousCharPtr == '\n')
+                            {
+                                textGeometryData->m_LinesStartPos.push_back(ImVec2(x, y));
+                                ImTextGlyphGeometryData geometryData{};
+                                geometryData.m_Unicode = '\n';
+                                geometryData.bIsNewLine = true;
+                                textGeometryData->m_TextGlyphs.push_back(geometryData);
+                            }
+                            else
+                            {
+                                textGeometryData->m_TextGlyphs.push_back({});
+                            }
+                        }
+                        else
+                        {
+                            textGeometryData->m_TextGlyphs.push_back({});
+                        }
+                    }
                     continue;
                 }
             }
@@ -640,6 +668,24 @@ namespace ImGui
             else
                 s += ImTextCharFromUtf8(&c, s, text_end);
 
+            if (textGeometryData != nullptr
+                && c != '\r'
+                && c != '\n'
+                )
+            {
+                if (c == ' ' || c == '\t')
+                {
+                    textGeometryData->m_TextGlyphs.push_back({});
+                }
+                else
+                {
+                    ImTextGlyphGeometryData glyphData{};
+                    glyphData.m_StartVertexIndex = currentVertexIndex;
+                    glyphData.m_Unicode = c;
+                    textGeometryData->m_TextGlyphs.push_back(glyphData);
+                }
+            }
+
             if (c < 32)
             {
                 if (c == '\n')
@@ -648,6 +694,16 @@ namespace ImGui
                     y += line_height;
                     if (y > clip_rect.w)
                         break; // break out of main loop
+
+                    if (textGeometryData != nullptr)
+                    {
+                        ImTextGlyphGeometryData geometryData{};
+                        geometryData.m_Unicode = '\n';
+                        geometryData.bIsNewLine = true;
+                        textGeometryData->m_TextGlyphs.push_back(geometryData);
+                        textGeometryData->m_LinesStartPos.push_back(ImVec2(x, y));
+                    }
+
                     continue;
                 }
                 if (c == '\r')
@@ -718,6 +774,8 @@ namespace ImGui
                         vtx_write += 4;
                         vtx_index += 4;
                         idx_write += 6;
+
+                        currentVertexIndex += 4;
                     }
                 }
             }
@@ -1732,7 +1790,8 @@ namespace ImGui
                 line_index->get_line_begin(buf_display, line_visible_n0),
                 line_index->get_line_end(buf_display, line_visible_n1 - 1),
                 wrap_width,
-                ImDrawTextFlags_WrapKeepBlanks | ImDrawTextFlags_CpuFineClip
+                ImDrawTextFlags_WrapKeepBlanks | ImDrawTextFlags_CpuFineClip,
+                textGeometryData
             );
 
             if (textGeometryData != nullptr)
