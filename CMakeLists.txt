@@ -13,3 +13,5 @@ file(GLOB IMGUI_SRC
 add_library(imgui STATIC ${IMGUI_SRC})
 
 target_include_directories(imgui PUBLIC ${IMGUI_DIR})
+
+target_compile_definitions(imgui PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
